@@ -45,8 +45,6 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            excludes += "META-INF/DEPENDENCIES"
-            excludes += "META-INF/INDEX.LIST"
         }
     }
 }
@@ -81,10 +79,8 @@ dependencies {
     // ML Kit OCR
     implementation(libs.mlkit.text.recognition)
 
-    // Google Auth & Calendar
+    // Google Auth
     implementation(libs.play.services.auth)
-    implementation(libs.google.api.client.android)
-    implementation(libs.google.api.services.calendar)
 
     // WorkManager
     implementation(libs.work.runtime.ktx)

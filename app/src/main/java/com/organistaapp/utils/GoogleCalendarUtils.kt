@@ -1,15 +1,10 @@
 package com.organistaapp.utils
 
+import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
-import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
-import com.google.api.client.http.javanet.NetHttpTransport
-import com.google.api.client.json.gson.GsonFactory
-import com.google.api.client.util.DateTime
-import com.google.api.services.calendar.Calendar
-import com.google.api.services.calendar.CalendarScopes
-import com.google.api.services.calendar.model.Event
-import com.google.api.services.calendar.model.EventDateTime
-import com.google.api.services.calendar.model.EventReminder
+import android.provider.CalendarContract
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.LocalDateTime
@@ -19,23 +14,42 @@ import javax.inject.Singleton
 
 @Singleton
 class GoogleCalendarUtils @Inject constructor(
-    private val context: Context
+    @ApplicationContext private val context: Context
 ) {
-    private fun getCalendarService(accountEmail: String): Calendar {
-        val credential = GoogleAccountCredential.usingOAuth2(
-            context,
-            listOf(CalendarScopes.CALENDAR)
-        ).apply {
-            selectedAccountName = accountEmail
-        }
-
-        return Calendar.Builder(
-            NetHttpTransport(),
-            GsonFactory.getDefaultInstance(),
-            credential
+    // Retorna o ID do primeiro calendário editável encontrado para a conta,
+    // ou o primeiro calendário disponível como fallback.
+    private fun encontrarCalendarioId(accountEmail: String): Long? {
+        val projection = arrayOf(
+            CalendarContract.Calendars._ID,
+            CalendarContract.Calendars.ACCOUNT_NAME
         )
-            .setApplicationName("OrganistaApp")
-            .build()
+
+        // Tenta encontrar calendário primário da conta
+        context.contentResolver.query(
+            CalendarContract.Calendars.CONTENT_URI,
+            projection,
+            "${CalendarContract.Calendars.ACCOUNT_NAME} = ? AND ${CalendarContract.Calendars.IS_PRIMARY} = 1",
+            arrayOf(accountEmail),
+            null
+        )?.use { if (it.moveToFirst()) return it.getLong(0) }
+
+        // Fallback: qualquer calendário da conta
+        context.contentResolver.query(
+            CalendarContract.Calendars.CONTENT_URI,
+            projection,
+            "${CalendarContract.Calendars.ACCOUNT_NAME} = ?",
+            arrayOf(accountEmail),
+            null
+        )?.use { if (it.moveToFirst()) return it.getLong(0) }
+
+        // Fallback final: primeiro calendário disponível
+        context.contentResolver.query(
+            CalendarContract.Calendars.CONTENT_URI,
+            projection,
+            null, null, null
+        )?.use { if (it.moveToFirst()) return it.getLong(0) }
+
+        return null
     }
 
     suspend fun criarEvento(
@@ -45,50 +59,34 @@ class GoogleCalendarUtils @Inject constructor(
         dataHora: LocalDateTime,
         duracaoMinutos: Int = 120
     ): String = withContext(Dispatchers.IO) {
-        val service = getCalendarService(accountEmail)
+        try {
+            val zone = ZoneId.systemDefault()
+            val startMillis = dataHora.atZone(zone).toInstant().toEpochMilli()
+            val endMillis = dataHora.plusMinutes(duracaoMinutos.toLong()).atZone(zone).toInstant().toEpochMilli()
 
-        val zone = ZoneId.systemDefault()
-        val startMillis = dataHora.atZone(zone).toInstant().toEpochMilli()
-        val endMillis = dataHora.plusMinutes(duracaoMinutos.toLong()).atZone(zone).toInstant().toEpochMilli()
+            val calendarId = encontrarCalendarioId(accountEmail) ?: return@withContext ""
 
-        val event = Event().apply {
-            summary = titulo
-            location = nomeIgreja
-            description = "Escala de organista - $nomeIgreja"
-
-            start = EventDateTime().apply {
-                dateTime = DateTime(startMillis)
-                timeZone = zone.id
-            }
-            end = EventDateTime().apply {
-                dateTime = DateTime(endMillis)
-                timeZone = zone.id
+            val values = ContentValues().apply {
+                put(CalendarContract.Events.DTSTART, startMillis)
+                put(CalendarContract.Events.DTEND, endMillis)
+                put(CalendarContract.Events.TITLE, titulo)
+                put(CalendarContract.Events.DESCRIPTION, "Escala de organista — $nomeIgreja")
+                put(CalendarContract.Events.EVENT_LOCATION, nomeIgreja)
+                put(CalendarContract.Events.CALENDAR_ID, calendarId)
+                put(CalendarContract.Events.EVENT_TIMEZONE, zone.id)
             }
 
-            // Lembrete padrão do Google Calendar (não substitui as notificações locais)
-            reminders = Event.Reminders().apply {
-                useDefault = false
-                overrides = listOf(
-                    EventReminder().apply {
-                        method = "popup"
-                        minutes = 60
-                    }
-                )
-            }
-        }
-
-        val createdEvent = service.events()
-            .insert("primary", event)
-            .execute()
-
-        createdEvent.id ?: ""
+            val uri = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
+            uri?.lastPathSegment ?: ""
+        } catch (_: Exception) { "" }
     }
 
     suspend fun deletarEvento(accountEmail: String, eventId: String) = withContext(Dispatchers.IO) {
         if (eventId.isBlank()) return@withContext
         try {
-            val service = getCalendarService(accountEmail)
-            service.events().delete("primary", eventId).execute()
+            val id = eventId.toLongOrNull() ?: return@withContext
+            val deleteUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id)
+            context.contentResolver.delete(deleteUri, null, null)
         } catch (_: Exception) { }
     }
 }
