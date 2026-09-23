@@ -19,7 +19,9 @@ data class CalendarioUiState(
     val mesSelecionado: YearMonth = YearMonth.now(),
     val eventosDoMes: List<Evento> = emptyList(),
     val isLoading: Boolean = true
-)
+) {
+    val nomeOrganista: String get() = organista?.nome ?: ""
+}
 
 @HiltViewModel
 class CalendarioViewModel @Inject constructor(

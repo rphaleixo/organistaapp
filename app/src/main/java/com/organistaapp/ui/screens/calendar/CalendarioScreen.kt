@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -22,6 +23,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.organistaapp.data.model.Evento
 import com.organistaapp.ui.theme.DouradoAcento
 import com.organistaapp.ui.theme.VioletaPrimario
+import com.organistaapp.utils.CompartilharUtils
 import java.time.*
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
@@ -29,8 +31,13 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CalendarioScreen(viewModel: CalendarioViewModel = hiltViewModel()) {
+fun CalendarioScreen(
+    onAdicionarEvento: () -> Unit = {},
+    viewModel: CalendarioViewModel = hiltViewModel()
+) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    val compartilharUtils = remember { CompartilharUtils() }
 
     Scaffold(
         topBar = {
@@ -39,8 +46,29 @@ fun CalendarioScreen(viewModel: CalendarioViewModel = hiltViewModel()) {
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     titleContentColor = Color.White
-                )
+                ),
+                actions = {
+                    if (uiState.eventosDoMes.isNotEmpty()) {
+                        IconButton(onClick = {
+                            compartilharUtils.compartilharEscala(
+                                context,
+                                uiState.eventosDoMes,
+                                uiState.nomeOrganista
+                            )
+                        }) {
+                            Icon(Icons.Filled.Share, "Compartilhar", tint = Color.White)
+                        }
+                    }
+                }
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = onAdicionarEvento,
+                containerColor = MaterialTheme.colorScheme.primary
+            ) {
+                Icon(Icons.Filled.Add, "Adicionar evento", tint = Color.White)
+            }
         }
     ) { paddingValues ->
         if (uiState.isLoading) {

@@ -31,6 +31,7 @@ import java.util.Locale
 fun HomeScreen(
     onVerCalendario: () -> Unit,
     onUpload: () -> Unit,
+    onAdicionarEvento: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -140,8 +141,14 @@ fun HomeScreen(
                 )
                 AcaoRapidaCard(
                     modifier = Modifier.weight(1f),
+                    icon = Icons.Filled.AddCircle,
+                    label = "Adicionar",
+                    onClick = onAdicionarEvento
+                )
+                AcaoRapidaCard(
+                    modifier = Modifier.weight(1f),
                     icon = Icons.Filled.CalendarMonth,
-                    label = "Ver Calendário",
+                    label = "Calendário",
                     onClick = onVerCalendario
                 )
             }

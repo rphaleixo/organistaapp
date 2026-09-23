@@ -91,6 +91,10 @@ dependencies {
     implementation(libs.hilt.work)
     ksp(libs.hilt.work.compiler)
 
+    // Glance Widget
+    implementation(libs.glance.appwidget)
+    implementation(libs.glance.material3)
+
     // Coil (image loading)
     implementation(libs.coil.compose)
 

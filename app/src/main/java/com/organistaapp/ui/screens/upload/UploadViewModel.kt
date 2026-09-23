@@ -4,46 +4,39 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.organistaapp.data.model.Escala
-import com.organistaapp.data.model.Evento
-import com.organistaapp.data.repository.EscalaRepository
-import com.organistaapp.data.repository.EventoRepository
 import com.organistaapp.data.repository.OrganistaRepository
-import com.organistaapp.utils.GoogleCalendarUtils
-import com.organistaapp.utils.NotificationUtils
+import com.organistaapp.utils.EventoExtraido
 import com.organistaapp.utils.OcrUtils
+import com.organistaapp.utils.PdfUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import java.io.File
-import java.time.LocalDateTime
-import java.time.ZoneId
 import javax.inject.Inject
 
 sealed class UploadState {
     object Idle : UploadState()
     object Loading : UploadState()
-    data class TextoExtraido(val texto: String, val eventosEncontrados: Int) : UploadState()
-    data class Sucesso(val eventosAdicionados: Int) : UploadState()
+    data class ProntoParaConfirmar(
+        val eventosExtraidos: List<EventoExtraido>,
+        val textoEscala: String,
+        val nomeArquivo: String,
+        val caminhoArquivo: String
+    ) : UploadState()
     data class Erro(val mensagem: String) : UploadState()
 }
 
 data class UploadUiState(
     val uploadState: UploadState = UploadState.Idle,
-    val arquivoSelecionado: String? = null,
-    val textoPreview: String = ""
+    val arquivoSelecionado: String? = null
 )
 
 @HiltViewModel
 class UploadViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val organistaRepository: OrganistaRepository,
-    private val escalaRepository: EscalaRepository,
-    private val eventoRepository: EventoRepository,
     private val ocrUtils: OcrUtils,
-    private val calendarUtils: GoogleCalendarUtils,
-    private val notificationUtils: NotificationUtils
+    private val pdfUtils: PdfUtils
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(UploadUiState())
@@ -51,99 +44,49 @@ class UploadViewModel @Inject constructor(
 
     fun processarArquivo(uri: Uri, nomeArquivo: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(
-                uploadState = UploadState.Loading,
-                arquivoSelecionado = nomeArquivo
-            )}
+            _uiState.update { it.copy(uploadState = UploadState.Loading, arquivoSelecionado = nomeArquivo) }
 
             try {
                 val organista = organistaRepository.getOrganistaPrincipal().first()
                     ?: run {
-                        _uiState.update { it.copy(
-                            uploadState = UploadState.Erro("Configure seu perfil antes de enviar a escala.")
-                        )}
+                        _uiState.update { it.copy(uploadState = UploadState.Erro("Configure seu perfil antes de enviar a escala.")) }
                         return@launch
                     }
 
-                val texto = ocrUtils.extrairTextoDeImagem(uri)
-                val eventos = ocrUtils.extrairEventosDaEscala(texto, organista.nome)
+                val texto = if (pdfUtils.isPdf(uri)) {
+                    pdfUtils.extrairTextoDePdf(uri)
+                } else {
+                    ocrUtils.extrairTextoDeImagem(uri)
+                }
 
-                _uiState.update { it.copy(
-                    uploadState = UploadState.TextoExtraido(texto, eventos.size),
-                    textoPreview = texto.take(500)
-                )}
+                if (texto.isBlank()) {
+                    _uiState.update { it.copy(uploadState = UploadState.Erro("Não foi possível extrair texto do arquivo. Tente uma imagem mais nítida.")) }
+                    return@launch
+                }
+
+                val eventos = ocrUtils.extrairEventosDaEscala(texto, organista.nome)
 
                 if (eventos.isEmpty()) {
                     _uiState.update { it.copy(
                         uploadState = UploadState.Erro(
-                            "Não foram encontrados eventos com seu nome na escala. " +
-                            "Verifique se o nome no perfil está correto."
+                            "Nenhum evento encontrado com o nome \"${organista.nome}\" na escala.\n\n" +
+                            "Verifique se o nome no perfil está idêntico ao da escala."
                         )
                     )}
                     return@launch
                 }
 
-                // Salva a escala no banco
-                val agora = System.currentTimeMillis()
-                val primeirEvento = eventos.first()
-                val escalaId = escalaRepository.saveEscala(
-                    Escala(
-                        organistaId = organista.id,
-                        nomeArquivo = nomeArquivo,
-                        caminhoArquivo = uri.toString(),
-                        textoExtraido = texto,
-                        mes = primeirEvento.data.monthValue,
-                        ano = primeirEvento.data.year,
-                        uploadedAt = agora
-                    )
-                )
-
-                // Cria eventos no banco e no Google Calendar
-                var eventosAdicionados = 0
-                for (eventoExtraido in eventos) {
-                    val dataHora = LocalDateTime.of(eventoExtraido.data, eventoExtraido.hora)
-                    val dataHoraMillis = dataHora.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-
-                    val titulo = "Escala - ${eventoExtraido.nomeIgreja}"
-                    var googleEventId = ""
-
-                    if (organista.googleAccountEmail.isNotBlank()) {
-                        try {
-                            googleEventId = calendarUtils.criarEvento(
-                                accountEmail = organista.googleAccountEmail,
-                                titulo = titulo,
-                                nomeIgreja = eventoExtraido.nomeIgreja,
-                                dataHora = dataHora
-                            )
-                        } catch (_: Exception) { }
-                    }
-
-                    val eventoId = eventoRepository.saveEvento(
-                        Evento(
-                            escalaId = escalaId,
-                            organistaId = organista.id,
-                            titulo = titulo,
-                            nomeIgreja = eventoExtraido.nomeIgreja,
-                            dataHora = dataHoraMillis,
-                            googleCalendarEventId = googleEventId
-                        )
-                    )
-
-                    // Agenda notificações
-                    val eventoSalvo = eventoRepository.getEventoById(eventoId)
-                    eventoSalvo?.let { notificationUtils.agendarNotificacoes(it) }
-
-                    eventosAdicionados++
-                }
-
                 _uiState.update { it.copy(
-                    uploadState = UploadState.Sucesso(eventosAdicionados)
+                    uploadState = UploadState.ProntoParaConfirmar(
+                        eventosExtraidos = eventos,
+                        textoEscala = texto,
+                        nomeArquivo = nomeArquivo,
+                        caminhoArquivo = uri.toString()
+                    )
                 )}
 
             } catch (e: Exception) {
-                _uiState.update { it.copy(
-                    uploadState = UploadState.Erro("Erro ao processar arquivo: ${e.message}")
-                )}
+                _uiState.update { it.copy(uploadState = UploadState.Erro("Erro ao processar arquivo: ${e.message}")) }
             }
         }
     }

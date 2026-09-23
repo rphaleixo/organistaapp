@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.organistaapp.data.local.AppDatabase
 import com.organistaapp.data.local.EscalaDao
 import com.organistaapp.data.local.EventoDao
+import com.organistaapp.data.local.IgrejaDao
 import com.organistaapp.data.local.OrganistaDao
 import dagger.Module
 import dagger.Provides
@@ -24,7 +25,7 @@ object AppModule {
             context,
             AppDatabase::class.java,
             "organista_db"
-        ).build()
+        ).fallbackToDestructiveMigration().build()
     }
 
     @Provides
@@ -35,6 +36,9 @@ object AppModule {
 
     @Provides
     fun provideEventoDao(db: AppDatabase): EventoDao = db.eventoDao()
+
+    @Provides
+    fun provideIgrejaDao(db: AppDatabase): IgrejaDao = db.igrejaDao()
 
     @Provides
     @Singleton

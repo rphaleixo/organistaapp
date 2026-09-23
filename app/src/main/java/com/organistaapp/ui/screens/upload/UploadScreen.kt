@@ -19,33 +19,44 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.organistaapp.ui.screens.confirmacao.ConfirmacaoViewModel
 import com.organistaapp.ui.theme.VioletaPrimario
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UploadScreen(viewModel: UploadViewModel = hiltViewModel()) {
+fun UploadScreen(
+    onNavConfirmacao: () -> Unit,
+    confirmacaoViewModel: ConfirmacaoViewModel,
+    viewModel: UploadViewModel = hiltViewModel()
+) {
     val uiState by viewModel.uiState.collectAsState()
-    val context = LocalContext.current
 
-    val imagemLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        uri?.let {
-            val nome = it.lastPathSegment ?: "escala.jpg"
-            viewModel.processarArquivo(it, nome)
-        }
+    val imagemLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let { viewModel.processarArquivo(it, it.lastPathSegment ?: "escala.jpg") }
+    }
+    val pdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let { viewModel.processarArquivo(it, it.lastPathSegment ?: "escala.pdf") }
+    }
+    val permissaoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) imagemLauncher.launch("image/*")
     }
 
-    val permissaoLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { concedido ->
-        if (concedido) imagemLauncher.launch("image/*")
+    LaunchedEffect(uiState.uploadState) {
+        val estado = uiState.uploadState
+        if (estado is UploadState.ProntoParaConfirmar) {
+            confirmacaoViewModel.carregarEventos(
+                eventosExtraidos = estado.eventosExtraidos,
+                textoEscala = estado.textoEscala,
+                nomeArquivo = estado.nomeArquivo,
+                caminhoArquivo = estado.caminhoArquivo
+            )
+            onNavConfirmacao()
+            viewModel.resetar()
+        }
     }
 
     Scaffold(
@@ -70,55 +81,84 @@ fun UploadScreen(viewModel: UploadViewModel = hiltViewModel()) {
             when (val estado = uiState.uploadState) {
                 is UploadState.Idle -> {
                     InstrucoesCard()
-                    AreaUpload(
-                        onSelecionarImagem = {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                permissaoLauncher.launch(Manifest.permission.READ_MEDIA_IMAGES)
-                            } else {
-                                imagemLauncher.launch("image/*")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OpcaoUploadCard(
+                            modifier = Modifier.weight(1f),
+                            icon = Icons.Filled.Image,
+                            titulo = "Imagem",
+                            subtitulo = "JPG, PNG",
+                            onClick = {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    permissaoLauncher.launch(Manifest.permission.READ_MEDIA_IMAGES)
+                                } else {
+                                    imagemLauncher.launch("image/*")
+                                }
                             }
-                        }
-                    )
+                        )
+                        OpcaoUploadCard(
+                            modifier = Modifier.weight(1f),
+                            icon = Icons.Filled.PictureAsPdf,
+                            titulo = "PDF",
+                            subtitulo = "Arquivo PDF",
+                            onClick = { pdfLauncher.launch("application/pdf") }
+                        )
+                    }
                 }
 
                 is UploadState.Loading -> {
-                    LoadingCard(nomeArquivo = uiState.arquivoSelecionado ?: "")
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(48.dp))
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text("Lendo escala...", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            uiState.arquivoSelecionado?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(0.6f))
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                "Extraindo texto e identificando dias de escala...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onSurface.copy(0.7f)
+                            )
+                        }
+                    }
                 }
 
-                is UploadState.TextoExtraido -> {
-                    StatusCard(
-                        icon = Icons.Filled.FindInPage,
-                        cor = MaterialTheme.colorScheme.secondary,
-                        titulo = "Texto extraído",
-                        mensagem = "Encontrados ${estado.eventosEncontrados} evento(s). Processando..."
-                    )
+                is UploadState.ProntoParaConfirmar -> {
+                    // Transição ocorre via LaunchedEffect
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Abrindo tela de confirmação...")
+                        }
+                    }
                 }
 
-                is UploadState.Sucesso -> {
-                    SucessoCard(eventosAdicionados = estado.eventosAdicionados)
-                    if (uiState.textoPreview.isNotBlank()) {
-                        TextoPreviewCard(texto = uiState.textoPreview)
+                is UploadState.Erro -> {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                    ) {
+                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.Top) {
+                            Icon(Icons.Filled.Error, null, tint = MaterialTheme.colorScheme.error)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(estado.mensagem, style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer)
+                        }
                     }
                     Button(
                         onClick = viewModel::resetar,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Filled.Upload, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Enviar outra escala")
-                    }
-                }
-
-                is UploadState.Erro -> {
-                    ErroCard(mensagem = estado.mensagem)
-                    Button(
-                        onClick = viewModel::resetar,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error
-                        )
-                    ) {
-                        Icon(Icons.Filled.Refresh, contentDescription = null)
+                        Icon(Icons.Filled.Refresh, null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Tentar novamente")
                     }
@@ -130,230 +170,55 @@ fun UploadScreen(viewModel: UploadViewModel = hiltViewModel()) {
 
 @Composable
 private fun InstrucoesCard() {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        )
-    ) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = "Como funciona",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
+            Text("Como funciona", style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(modifier = Modifier.height(8.dp))
-            InstrucaoItem(numero = "1", texto = "Fotografe ou selecione a imagem da sua escala")
-            InstrucaoItem(numero = "2", texto = "O app lê o texto automaticamente com OCR")
-            InstrucaoItem(numero = "3", texto = "Seus dias são identificados e salvos na agenda")
-            InstrucaoItem(numero = "4", texto = "Notificações são agendadas 72h antes e no dia")
+            listOf(
+                "1" to "Envie a foto ou PDF da sua escala",
+                "2" to "O app lê o texto e identifica seus dias",
+                "3" to "Você revisa os eventos antes de salvar",
+                "4" to "Eventos criados na agenda + notificações automáticas"
+            ).forEach { (num, texto) ->
+                Row(modifier = Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier.size(22.dp).clip(RoundedCornerShape(11.dp))
+                            .background(MaterialTheme.colorScheme.primary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(num, style = MaterialTheme.typography.labelSmall, color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(texto, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun InstrucaoItem(numero: String, texto: String) {
-    Row(
-        modifier = Modifier.padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(24.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.primary),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = numero,
-                style = MaterialTheme.typography.labelMedium,
-                color = Color.White,
-                fontWeight = FontWeight.Bold
-            )
-        }
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = texto,
-            style = MaterialTheme.typography.bodyMedium
-        )
-    }
-}
-
-@Composable
-private fun AreaUpload(onSelecionarImagem: () -> Unit) {
+private fun OpcaoUploadCard(
+    modifier: Modifier = Modifier,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    titulo: String,
+    subtitulo: String,
+    onClick: () -> Unit
+) {
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(200.dp)
+        modifier = modifier
+            .height(140.dp)
             .clip(RoundedCornerShape(12.dp))
-            .border(
-                width = 2.dp,
-                color = VioletaPrimario.copy(alpha = 0.5f),
-                shape = RoundedCornerShape(12.dp)
-            )
+            .border(2.dp, VioletaPrimario.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surface)
-            .clickable { onSelecionarImagem() },
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                imageVector = Icons.Filled.AddPhotoAlternate,
-                contentDescription = null,
-                modifier = Modifier.size(56.dp),
-                tint = VioletaPrimario
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = "Toque para selecionar",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = VioletaPrimario
-            )
-            Text(
-                text = "Foto da escala (JPG, PNG)",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-            )
-        }
-    }
-}
-
-@Composable
-private fun LoadingCard(nomeArquivo: String) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            CircularProgressIndicator(modifier = Modifier.size(48.dp))
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = "Lendo escala...",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            if (nomeArquivo.isNotBlank()) {
-                Text(
-                    text = nomeArquivo,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                )
-            }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(icon, null, modifier = Modifier.size(40.dp), tint = VioletaPrimario)
             Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Extraindo texto e identificando dias de escala...",
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-            )
-        }
-    }
-}
-
-@Composable
-private fun SucessoCard(eventosAdicionados: Int) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.tertiaryContainer
-                ?: MaterialTheme.colorScheme.secondaryContainer
-        )
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                Icons.Filled.CheckCircle,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(40.dp)
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-                Text(
-                    text = "Escala processada!",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "$eventosAdicionados evento(s) adicionado(s) à agenda com notificações configuradas.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ErroCard(mensagem: String) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer
-        )
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.Top
-        ) {
-            Icon(
-                Icons.Filled.Error,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(24.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = mensagem,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onErrorContainer
-            )
-        }
-    }
-}
-
-@Composable
-private fun StatusCard(
-    icon: ImageVector,
-    cor: Color,
-    titulo: String,
-    mensagem: String
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, tint = cor, modifier = Modifier.size(32.dp))
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-                Text(titulo, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                Text(mensagem, style = MaterialTheme.typography.bodySmall)
-            }
-        }
-    }
-}
-
-@Composable
-private fun TextoPreviewCard(texto: String) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                "Texto extraído (prévia):",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = if (texto.length > 300) texto.take(300) + "..." else texto,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Text(titulo, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = VioletaPrimario)
+            Text(subtitulo, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(0.5f))
         }
     }
 }

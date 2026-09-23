@@ -3,4 +3,5 @@
     <string name="app_name">OrganistaApp</string>
     <string name="notification_channel_name">Escalas de Organista</string>
     <string name="notification_channel_description">Lembretes automáticos de dias de escala</string>
+    <string name="widget_description">Mostra o próximo dia de escala na tela inicial</string>
 </resources>
