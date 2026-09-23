@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OrganistaApp</string>
+    <string name="notification_channel_name">Escalas de Organista</string>
+    <string name="notification_channel_description">Lembretes automáticos de dias de escala</string>
+</resources>

@@ -1,0 +1,5 @@
+-keep class com.organistaapp.data.model.** { *; }
+-keep class com.google.api.services.calendar.** { *; }
+-keep class com.google.api.client.** { *; }
+-dontwarn com.google.api.client.**
+-dontwarn org.apache.http.**
