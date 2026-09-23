@@ -23,7 +23,10 @@ data class Igreja(
     val organistaId: Long,
     val nome: String,
     val endereco: String = "",
+    val diaCulto: String = "",        // ex: "Domingo", "Segunda"
     val horarioPadrao: String = "08:00",
+    val emRodizio: Boolean = false,
+    val arquivada: Boolean = false,
     val cor: String = "#6B3FA0",
     val createdAt: Long = System.currentTimeMillis()
 )

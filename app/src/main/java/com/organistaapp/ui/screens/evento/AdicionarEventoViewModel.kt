@@ -48,7 +48,7 @@ class AdicionarEventoViewModel @Inject constructor(
         viewModelScope.launch {
             organistaRepository.getOrganistaPrincipal().collect { organista ->
                 organista?.let {
-                    igrejaRepository.getIgrejasByOrganista(it.id).collect { igrejas ->
+                    igrejaRepository.getIgrejasAtivas(it.id).collect { igrejas ->
                         _uiState.update { state -> state.copy(igrejas = igrejas) }
                     }
                 }

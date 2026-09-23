@@ -10,6 +10,12 @@ import javax.inject.Singleton
 class IgrejaRepository @Inject constructor(
     private val dao: IgrejaDao
 ) {
+    fun getIgrejasAtivas(organistaId: Long): Flow<List<Igreja>> =
+        dao.getIgrejasAtivas(organistaId)
+
+    fun getIgrejasArquivadas(organistaId: Long): Flow<List<Igreja>> =
+        dao.getIgrejasArquivadas(organistaId)
+
     fun getIgrejasByOrganista(organistaId: Long): Flow<List<Igreja>> =
         dao.getIgrejasByOrganista(organistaId)
 
@@ -20,4 +26,8 @@ class IgrejaRepository @Inject constructor(
     suspend fun updateIgreja(igreja: Igreja) = dao.updateIgreja(igreja)
 
     suspend fun deleteIgreja(igreja: Igreja) = dao.deleteIgreja(igreja)
+
+    suspend fun arquivarIgreja(id: Long) = dao.setArquivada(id, true)
+
+    suspend fun desarquivarIgreja(id: Long) = dao.setArquivada(id, false)
 }

@@ -9,7 +9,7 @@ import com.organistaapp.data.model.Organista
 
 @Database(
     entities = [Organista::class, Escala::class, Evento::class, Igreja::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
